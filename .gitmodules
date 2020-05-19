@@ -1,0 +1,6 @@
+[submodule "network-hardware-video-decoder"]
+	path = network-hardware-video-decoder
+	url = https://github.com/bmegli/network-hardware-video-decoder.git
+[submodule "hardware-depth-unprojector"]
+	path = hardware-depth-unprojector
+	url = https://github.com/bmegli/hardware-depth-unprojector.git
