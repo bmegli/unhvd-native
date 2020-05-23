@@ -108,6 +108,8 @@ struct unhvd_depth_config
 	float fx; //!< focal length in pixel width unit
 	float fy; //!< focal length in pixel height unit
 	float depth_unit; //!< multiplier for raw depth data;
+	float min_margin; //!< minimal margin to treat as valid in result unit (raw data * depth_unit);
+	float max_margin; //!< maximal margin to treat as valid in result unit (raw data * depth_unit);
 };
 
 enum UNHVD_COMPILE_TIME_CONSTANTS

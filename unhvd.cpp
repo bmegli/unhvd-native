@@ -93,7 +93,9 @@ struct unhvd *unhvd_init(
 	if(depth_config)
 	{
 		const unhvd_depth_config *dc = depth_config;
-		if( (u->hardware_unprojector = hdu_init(dc->ppx, dc->ppy, dc->fx, dc->fy, dc->depth_unit)) == NULL )
+		const hdu_config hdu_cfg = {dc->ppx, dc->ppy, dc->fx, dc->fy, dc->depth_unit, dc->min_margin, dc->max_margin};
+
+		if( (u->hardware_unprojector = hdu_init(&hdu_cfg)) == NULL )
 			return unhvd_close_and_return_null(u, "failed to initialize hardware unprojector");
 	}
 
