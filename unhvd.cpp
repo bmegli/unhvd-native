@@ -25,7 +25,7 @@
 using namespace std;
 
 static void unhvd_network_decoder_thread(unhvd *n);
-static int unhvd_unproject_depth_frame(unhvd *n, const AVFrame *depth_frame, const AVFrame *texture_frame);
+static int unhvd_unproject_depth_frame(unhvd *n, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc);
 static unhvd *unhvd_close_and_return_null(unhvd *n, const char *msg);
 static int UNHVD_ERROR_MSG(const char *msg);
 
@@ -35,10 +35,10 @@ struct unhvd
 	int decoders;
 
 	AVFrame *frame[UNHVD_MAX_DECODERS];
-	std::mutex mutex; //guards frame and point_cloud
+	std::mutex mutex; //guards frame and point_cloud_shared
 
 	hdu *hardware_unprojector;
-	hdu_point_cloud point_cloud;
+	hdu_point_cloud point_cloud, point_cloud_shared;
 
 	thread network_thread;
 	bool keep_working;
@@ -49,6 +49,7 @@ struct unhvd
 			frame(), //zero out
 			hardware_unprojector(NULL),
 			point_cloud(),
+			point_cloud_shared(),
 			keep_working(true)
 	{}
 };
@@ -116,7 +117,11 @@ static void unhvd_network_decoder_thread(unhvd *u)
 		if(status == NHVD_TIMEOUT)
 			continue; //keep working
 
-		//the next calls to nhvd_receive will unref the current
+		if(u->hardware_unprojector && frames[0])
+			if(unhvd_unproject_depth_frame(u, frames[0], frames[1], &u->point_cloud) != UNHVD_OK)
+				break;
+
+		//the next call to nhvd_receive will unref the current
 		//frames so we have to either consume set of frames or ref it
 		std::lock_guard<std::mutex> frame_guard(u->mutex);
 
@@ -128,8 +133,11 @@ static void unhvd_network_decoder_thread(unhvd *u)
 			}
 
 		if(u->hardware_unprojector && frames[0])
-			if(unhvd_unproject_depth_frame(u, u->frame[0], u->frame[1]) != UNHVD_OK)
-				break;
+		{	//swap internal and shared point cloud (copy 2 ints and 2 pointers)
+			hdu_point_cloud temp = u->point_cloud_shared;
+			u->point_cloud_shared = u->point_cloud;
+			u->point_cloud = temp;
+		}
 	}
 
 	if(u->keep_working)
@@ -138,8 +146,7 @@ static void unhvd_network_decoder_thread(unhvd *u)
 	cerr << "unhvd: network decoder thread finished" << endl;
 }
 
-
-static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, const AVFrame *texture_frame)
+static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc)
 {
 	if(depth_frame->linesize[0] / depth_frame->width != 2 ||
 		(depth_frame->format != AV_PIX_FMT_P010LE && depth_frame->format != AV_PIX_FMT_P016LE))
@@ -150,14 +157,14 @@ static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, con
 		return UNHVD_ERROR_MSG("unhvd_unproject_depth_frame expects RGB0/RGBA texture data");
 
 	int size = depth_frame->width * depth_frame->height;
-	if(size != u->point_cloud.size)
+	if(size != pc->size)
 	{
-		delete [] u->point_cloud.data;
-		delete [] u->point_cloud.colors;
-		u->point_cloud.data = new float3[size];
-		u->point_cloud.colors = new color32[size];
-		u->point_cloud.size = size;
-		u->point_cloud.used = 0;
+		delete [] pc->data;
+		delete [] pc->colors;
+		pc->data = new float3[size];
+		pc->colors = new color32[size];
+		pc->size = size;
+		pc->used = 0;
 	}
 
 	uint16_t *depth_data = (uint16_t*)depth_frame->data[0];
@@ -168,10 +175,10 @@ static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, con
 	hdu_depth depth = {depth_data, texture_data, depth_frame->width, depth_frame->height,
 		depth_frame->linesize[0], texture_linesize};
 	//this could be moved to separate thread
-	hdu_unproject(u->hardware_unprojector, &depth, &u->point_cloud);
+	hdu_unproject(u->hardware_unprojector, &depth, pc);
 	//zero out unused point cloud entries
-	memset(u->point_cloud.data + u->point_cloud.used, 0, (u->point_cloud.size-u->point_cloud.used)*sizeof(u->point_cloud.data[0]));
-	memset(u->point_cloud.colors + u->point_cloud.used, 0, (u->point_cloud.size-u->point_cloud.used)*sizeof(u->point_cloud.colors[0]));
+	memset(pc->data + pc->used, 0, (pc->size-pc->used)*sizeof(pc->data[0]));
+	memset(pc->colors + pc->used, 0, (pc->size-pc->used)*sizeof(pc->colors[0]));
 
 	return UNHVD_OK;
 }
@@ -206,14 +213,13 @@ int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc)
 			memcpy(frame[i].data, u->frame[i]->data, sizeof(frame[i].data));
 		}
 
-	//future -consider only updating if updated frame[0] or other way
 	if(pc && u->hardware_unprojector)
 	{
 		//copy just two pointers and ints
-		pc->data = u->point_cloud.data;
-		pc->colors = u->point_cloud.colors;
-		pc->size = u->point_cloud.size;
-		pc->used = u->point_cloud.used;
+		pc->data = u->point_cloud_shared.data;
+		pc->colors = u->point_cloud_shared.colors;
+		pc->size = u->point_cloud_shared.size;
+		pc->used = u->point_cloud_shared.used;
 	}
 
 	return UNHVD_OK;
@@ -280,6 +286,8 @@ void unhvd_close(unhvd *u)
 	hdu_close(u->hardware_unprojector);
 	delete [] u->point_cloud.data;
 	delete [] u->point_cloud.colors;
+	delete [] u->point_cloud_shared.data;
+	delete [] u->point_cloud_shared.colors;
 
 	delete u;
 }
