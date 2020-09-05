@@ -78,7 +78,7 @@ struct unhvd *unhvd_init(
 		nhvd_hw[i] = hw;
 	}
 
-	if( (u->network_decoder = nhvd_init(&nhvd_net, nhvd_hw, hw_size)) == NULL)
+	if( (u->network_decoder = nhvd_init(&nhvd_net, nhvd_hw, hw_size, 0)) == NULL)
 		return unhvd_close_and_return_null(u, "failed to initialize NHVD");
 
 	u->decoders = hw_size;
