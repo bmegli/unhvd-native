@@ -149,6 +149,11 @@ typedef float float3[3];
 typedef uint32_t color32;
 
 /**
+  * @brief Quaternion data (x, y, z, w)
+  */
+typedef float float4[4];
+
+/**
  * @struct unhvd_point_cloud
  * @brief Point cloud abstraction.
  *
@@ -162,6 +167,8 @@ struct unhvd_point_cloud
 	color32 *colors; //!< array of point colors
 	int size; //!< size of array
 	int used; //!< number of elements used in array
+	float3 position; //!< position vector XYZ from which point cloud was captured
+	float4 rotation; //!< heading quaternion XYZW from which point cloud was captured
 };
 
 /**
