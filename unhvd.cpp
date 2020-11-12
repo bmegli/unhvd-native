@@ -39,6 +39,8 @@ struct unhvd
 
 	hdu *hardware_unprojector;
 	hdu_point_cloud point_cloud, point_cloud_shared;
+	float3 position_shared;
+	float4 rotation_shared;
 
 	thread network_thread;
 	bool keep_working;
@@ -50,6 +52,8 @@ struct unhvd
 			hardware_unprojector(NULL),
 			point_cloud(),
 			point_cloud_shared(),
+			position_shared(),
+			rotation_shared(),
 			keep_working(true)
 	{}
 };
@@ -78,7 +82,7 @@ struct unhvd *unhvd_init(
 		nhvd_hw[i] = hw;
 	}
 
-	if( (u->network_decoder = nhvd_init(&nhvd_net, nhvd_hw, hw_size, 0)) == NULL)
+	if( (u->network_decoder = nhvd_init(&nhvd_net, nhvd_hw, hw_size, 1)) == NULL)
 		return unhvd_close_and_return_null(u, "failed to initialize NHVD");
 
 	u->decoders = hw_size;
@@ -105,14 +109,21 @@ struct unhvd *unhvd_init(
 	return u;
 }
 
+//temp pose data
+struct pose_data
+{
+	float position_xyz[3]; //vector
+	float heading_xyzw[4]; //quaternion
+} __attribute__((packed));
+
 static void unhvd_network_decoder_thread(unhvd *u)
 {
 	AVFrame *frames[UNHVD_MAX_DECODERS];
+	struct nhvd_frame raws[UNHVD_MAX_DECODERS + 1] = {0};	
 	int status;
 
-
 	while( u->keep_working &&
-	     ((status = nhvd_receive(u->network_decoder, frames) ) != NHVD_ERROR) )
+	     ((status = nhvd_receive_all(u->network_decoder, frames, raws) ) != NHVD_ERROR) )
 	{
 		if(status == NHVD_TIMEOUT)
 			continue; //keep working
@@ -137,6 +148,14 @@ static void unhvd_network_decoder_thread(unhvd *u)
 			hdu_point_cloud temp = u->point_cloud_shared;
 			u->point_cloud_shared = u->point_cloud;
 			u->point_cloud = temp;
+			
+			if(raws[2].size)
+			{
+				pose_data pdata;
+				memcpy(&pdata, raws[2].data, sizeof(pose_data));
+				memcpy(u->position_shared, pdata.position_xyz, sizeof(u->position_shared));
+				memcpy(u->rotation_shared, pdata.heading_xyzw, sizeof(u->rotation_shared));
+			}
 		}
 	}
 
@@ -220,6 +239,8 @@ int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc)
 		pc->colors = u->point_cloud_shared.colors;
 		pc->size = u->point_cloud_shared.size;
 		pc->used = u->point_cloud_shared.used;
+		memcpy(pc->position, u->position_shared, sizeof(pc->position));
+		memcpy(pc->rotation, u->rotation_shared, sizeof(pc->rotation));
 	}
 
 	return UNHVD_OK;
