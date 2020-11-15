@@ -24,8 +24,15 @@
 
 using namespace std;
 
+//temp pose data
+struct pose_data
+{
+	float position_xyz[3]; //vector
+	float heading_xyzw[4]; //quaternion
+} __attribute__((packed));
+
 static void unhvd_network_decoder_thread(unhvd *n);
-static int unhvd_unproject_depth_frame(unhvd *n, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc);
+static int unhvd_unproject_depth_frame(unhvd *n, const pose_data *pose, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc);
 static unhvd *unhvd_close_and_return_null(unhvd *n, const char *msg);
 static int UNHVD_ERROR_MSG(const char *msg);
 
@@ -109,13 +116,6 @@ struct unhvd *unhvd_init(
 	return u;
 }
 
-//temp pose data
-struct pose_data
-{
-	float position_xyz[3]; //vector
-	float heading_xyzw[4]; //quaternion
-} __attribute__((packed));
-
 static void unhvd_network_decoder_thread(unhvd *u)
 {
 	AVFrame *frames[UNHVD_MAX_DECODERS];
@@ -128,10 +128,16 @@ static void unhvd_network_decoder_thread(unhvd *u)
 		if(status == NHVD_TIMEOUT)
 			continue; //keep working
 
-		if(u->hardware_unprojector && frames[0])
-			if(unhvd_unproject_depth_frame(u, frames[0], frames[1], &u->point_cloud) != UNHVD_OK)
-				break;
+		pose_data pose = { {0, 0, 0}, {0, 0, 0, 1} };
 
+		if(u->hardware_unprojector && frames[0])
+		{
+			if(raws[2].size)
+				memcpy(&pose, raws[2].data, sizeof(pose_data));
+				
+			if(unhvd_unproject_depth_frame(u, &pose, frames[0], frames[1], &u->point_cloud) != UNHVD_OK)
+				break;
+		}
 		//the next call to nhvd_receive will unref the current
 		//frames so we have to either consume set of frames or ref it
 		std::lock_guard<std::mutex> frame_guard(u->mutex);
@@ -151,10 +157,8 @@ static void unhvd_network_decoder_thread(unhvd *u)
 			
 			if(raws[2].size)
 			{
-				pose_data pdata;
-				memcpy(&pdata, raws[2].data, sizeof(pose_data));
-				memcpy(u->position_shared, pdata.position_xyz, sizeof(u->position_shared));
-				memcpy(u->rotation_shared, pdata.heading_xyzw, sizeof(u->rotation_shared));
+				memcpy(u->position_shared, pose.position_xyz, sizeof(u->position_shared));
+				memcpy(u->rotation_shared, pose.heading_xyzw, sizeof(u->rotation_shared));
 			}
 		}
 	}
@@ -165,7 +169,7 @@ static void unhvd_network_decoder_thread(unhvd *u)
 	cerr << "unhvd: network decoder thread finished" << endl;
 }
 
-static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc)
+static int unhvd_unproject_depth_frame(unhvd *u, const pose_data *pose, const AVFrame *depth_frame, const AVFrame *texture_frame, hdu_point_cloud *pc)
 {
 	if(depth_frame->linesize[0] / depth_frame->width != 2 ||
 		(depth_frame->format != AV_PIX_FMT_P010LE && depth_frame->format != AV_PIX_FMT_P016LE))
@@ -192,7 +196,7 @@ static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, con
 	int texture_linesize = texture_frame ? texture_frame->linesize[0] : 0;
 
 	hdu_depth depth = {depth_data, texture_data, depth_frame->width, depth_frame->height,
-		depth_frame->linesize[0], texture_linesize};
+		depth_frame->linesize[0], texture_linesize, pose->position_xyz, pose->heading_xyzw};
 	//this could be moved to separate thread
 	hdu_unproject(u->hardware_unprojector, &depth, pc);
 	//zero out unused point cloud entries
