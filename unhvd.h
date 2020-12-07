@@ -167,6 +167,19 @@ struct unhvd_point_cloud
 	color32 *colors; //!< array of point colors
 	int size; //!< size of array
 	int used; //!< number of elements used in array
+};
+
+
+/**
+ * @struct unhvd_pose
+ * @brief Pose from which data was taken
+ *
+ * Postion vector and rotation quaternion
+ *
+ * @see unhvd_get_begin, unhvd_get_end
+ */
+struct unhvd_pose
+{
 	float3 position; //!< position vector XYZ from which point cloud was captured
 	float4 rotation; //!< heading quaternion XYZW from which point cloud was captured
 };
@@ -249,15 +262,19 @@ UNHVD_EXPORT UNHVD_API void unhvd_close(unhvd *u);
  * Point cloud data may be only retrieved if non NULL ::unhvd_depth_config was passed to ::unhvd_init.
  * This function may retrieve both depth frame and unprojected point cloud at the same time
  */
-UNHVD_EXPORT UNHVD_API int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc);
+UNHVD_EXPORT UNHVD_API int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc, unhvd_pose *pose);
 /** @brief Finish retrieval. */
 UNHVD_EXPORT UNHVD_API int unhvd_get_end(unhvd *u);
 /** @brief Retrieve video frame. */
 UNHVD_EXPORT UNHVD_API int unhvd_get_frame_begin(unhvd *u, unhvd_frame *frame);
+/** @brief Retrieve video frame with pose. */
+UNHVD_EXPORT UNHVD_API int unhvd_get_frame_pose_begin(unhvd *u, unhvd_frame *frame, unhvd_pose *pose);
 /** @brief Finish retrieval. */
 UNHVD_EXPORT UNHVD_API int unhvd_get_frame_end(unhvd *u);
 /** @brief Retrieve point cloud. */
 UNHVD_EXPORT UNHVD_API int unhvd_get_point_cloud_begin(unhvd *u, unhvd_point_cloud *pc);
+/** @brief Retrieve point cloud. */
+UNHVD_EXPORT UNHVD_API int unhvd_get_point_cloud_pose_begin(unhvd *u, unhvd_point_cloud *pc, unhvd_pose *pose);
 /** @brief Finish retrieval. */
 UNHVD_EXPORT UNHVD_API int unhvd_get_point_cloud_end(unhvd *u);
 ///@}

@@ -39,8 +39,7 @@ struct unhvd
 
 	hdu *hardware_unprojector;
 	hdu_point_cloud point_cloud, point_cloud_shared;
-	float3 position_shared;
-	float4 rotation_shared;
+	unhvd_pose pose_shared;
 
 	thread network_thread;
 	bool keep_working;
@@ -52,8 +51,7 @@ struct unhvd
 			hardware_unprojector(NULL),
 			point_cloud(),
 			point_cloud_shared(),
-			position_shared(),
-			rotation_shared(),
+			pose_shared(),
 			keep_working(true)
 	{}
 };
@@ -109,13 +107,6 @@ struct unhvd *unhvd_init(
 	return u;
 }
 
-//temp pose data
-struct pose_data
-{
-	float position_xyz[3]; //vector
-	float heading_xyzw[4]; //quaternion
-} __attribute__((packed));
-
 static void unhvd_network_decoder_thread(unhvd *u)
 {
 	AVFrame *frames[UNHVD_MAX_DECODERS];
@@ -143,19 +134,17 @@ static void unhvd_network_decoder_thread(unhvd *u)
 				av_frame_ref(u->frame[i], frames[i]);
 			}
 
+		if(raws[2].size) //needs more checks
+		{
+			memcpy(u->pose_shared.position, raws[2].data, sizeof(u->pose_shared.position));
+			memcpy(u->pose_shared.rotation, raws[2].data + sizeof(u->pose_shared.position), sizeof(u->pose_shared.rotation));
+		}
+
 		if(u->hardware_unprojector && frames[0])
 		{	//swap internal and shared point cloud (copy 2 ints and 2 pointers)
 			hdu_point_cloud temp = u->point_cloud_shared;
 			u->point_cloud_shared = u->point_cloud;
 			u->point_cloud = temp;
-			
-			if(raws[2].size)
-			{
-				pose_data pdata;
-				memcpy(&pdata, raws[2].data, sizeof(pose_data));
-				memcpy(u->position_shared, pdata.position_xyz, sizeof(u->position_shared));
-				memcpy(u->rotation_shared, pdata.heading_xyzw, sizeof(u->rotation_shared));
-			}
 		}
 	}
 
@@ -203,7 +192,7 @@ static int unhvd_unproject_depth_frame(unhvd *u, const AVFrame *depth_frame, con
 }
 
 //NULL if there is no fresh data, non NULL otherwise
-int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc)
+int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc, unhvd_pose *pose)
 {
 	if(u == NULL)
 		return UNHVD_ERROR;
@@ -239,8 +228,12 @@ int unhvd_get_begin(unhvd *u, unhvd_frame *frame, unhvd_point_cloud *pc)
 		pc->colors = u->point_cloud_shared.colors;
 		pc->size = u->point_cloud_shared.size;
 		pc->used = u->point_cloud_shared.used;
-		memcpy(pc->position, u->position_shared, sizeof(pc->position));
-		memcpy(pc->rotation, u->rotation_shared, sizeof(pc->rotation));
+	}
+
+	if(pose)
+	{
+		memcpy(pose->position, u->pose_shared.position, sizeof(pose->position));
+		memcpy(pose->rotation, u->pose_shared.rotation, sizeof(pose->rotation));
 	}
 
 	return UNHVD_OK;
@@ -262,7 +255,12 @@ int unhvd_get_end(struct unhvd *u)
 
 int unhvd_get_frame_begin(unhvd *u, unhvd_frame *frame)
 {
-	return unhvd_get_begin(u, frame, NULL);
+	return unhvd_get_begin(u, frame, NULL, NULL);
+}
+
+int unhvd_get_frame_pose_begin(unhvd *u, unhvd_frame *frame, unhvd_pose *pose)
+{
+	return unhvd_get_begin(u, frame, NULL, pose);
 }
 
 int unhvd_get_frame_end(struct unhvd *u)
@@ -272,7 +270,12 @@ int unhvd_get_frame_end(struct unhvd *u)
 
 int unhvd_get_point_cloud_begin(unhvd *u, unhvd_point_cloud *pc)
 {
-	return unhvd_get_begin(u, NULL, pc);
+	return unhvd_get_begin(u, NULL, pc, NULL);
+}
+
+int unhvd_get_point_cloud_pose_begin(unhvd *u, unhvd_point_cloud *pc, unhvd_pose *pose)
+{
+	return unhvd_get_begin(u, NULL, pc, pose);
 }
 
 int unhvd_get_point_cloud_end(unhvd *u)
